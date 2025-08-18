@@ -15,56 +15,34 @@ import json
 from matplotlib.colors import ListedColormap
 from string import Template
 # load data
-preprocessedData = pd.read_csv(os.path.join('/','home','zjpeters','Documents','otherLabs','agarza','rawdata','preprocessed_MDD_data.csv'), index_col=0)
 columnHeadersAndFilenames= json.load(open(os.path.join('/','home','zjpeters','Documents','otherLabs','agarza','code','columnHeadersAndFileNames.json')))
 plt.style.use('seaborn-v0_8-colorblind')
 
-# palette from https://www.color-hex.com/color-palette/49436
-fiveColorPalette = []
-fiveColorPalette.append(np.array([213 / 255, 94 / 255,0 / 255]))
-fiveColorPalette.append(np.array([204 / 255,121 / 255,167 / 255]))
-fiveColorPalette.append(np.array([0 / 255, 114 / 255, 178 / 255]))
-fiveColorPalette.append(np.array([240 / 255, 228 / 255, 66 / 255]))
-fiveColorPalette.append(np.array([0 / 255, 158 / 255, 115 / 255]))
-fiveColorPalette= np.array(fiveColorPalette)
+# colors to use in the output figures, with scatter color being slightly darker
+colorHCHex = '#f3766e'
+colorHCScatterHex = '#fe4d34'
+colorMDDHex = '#1cbdc2'
+colorMDDScatterHex = '#14a7c2'
 
-# palette from https://projects.susielu.com/viz-palette?colors=[%22#ffd700%22,%22#ffb14e%22,%22#fa8775%22,%22#ea5f94%22,%22#cd34b5%22,%22#9d02d7%22,%22#0000ff%22]&backgroundColor=%22white%22&fontColor=%22black%22&mode=%22normal%22
-sevenColorPalette = []
-sevenColorPalette.append("#0000ff") # indigo
-sevenColorPalette.append("#9d02d7") # dark magenta
-sevenColorPalette.append("#cd34b5") # light magenta
-sevenColorPalette.append("#ea5f94") # pink
-sevenColorPalette.append("#fa8775") # light orange
-sevenColorPalette.append("#ffb14e") # orange
-sevenColorPalette.append("#ffd700") # gold
-sevenColorPalette = np.array(sevenColorPalette)
+# data locations
+derivatives = os.path.join('/','home','zjpeters','Documents','otherLabs','agarza','derivatives')
+rawdata = os.path.join('/','home','zjpeters','Documents','otherLabs','agarza','rawdata')
+preprocessedData = pd.read_csv(os.path.join(rawdata,'preprocessed_MDD_data.csv'), index_col=0)
 
-colorBlindColorPalette = []
-colorBlindColorPalette.append("#f05039")
-colorBlindColorPalette.append("#e57a77")
-colorBlindColorPalette.append("#eebab4")
-colorBlindColorPalette.append("#1f449c")
-colorBlindColorPalette.append("#3d65a5")
-colorBlindColorPalette.append("#7ca1cc")
-colorBlindColorPalette.append("#a8b6cc")
-colorBlindColorPalette = np.array(colorBlindColorPalette)
-def displayColorPalettes(colorPalette):
-    paletteSize = len(colorPalette)
-    paletteImage = np.zeros([paletteSize, 1])
-    for i in range(paletteSize):
-        paletteImage[i,:] = i+1
-    plt.figure()
-    plt.imshow(paletteImage,cmap=ListedColormap(colorPalette))
-    plt.show()
-# displayColorPalettes(sevenColorPalette)
-# displayColorPalettes(fiveColorPalette)
-# displayColorPalettes(colorBlindColorPalette)
+def hex_to_rgb(value):
+    """"taken from: https://stackoverflow.com/questions/214359/converting-hex-color-to-rgb-and-vice-versa"""
+    """Return (red, green, blue) for the color given as #rrggbb."""
+    value = value.lstrip('#')
+    lv = len(value)
+    return tuple(int(value[i:i + lv // 3], 16) for i in range(0, lv, lv // 3))
 
 #%% begin processing data
+# set list of columns that won't be used when running t-test
 ignoreColumns = ['Unnamed: 0', 'Date of Analysis', 'Study', 'ID', 'control ID Doro', 'group', \
                 'exclusion', 'DATEOFBIRTH', 'AGE', 'SEX', 'Smoking Status', \
                 'Smoking', 'Alcohol', 'Other drugs', '0', 'Weight', \
                 'Infektionskrankheiten']
+
 hcIdx = preprocessedData['group'] == 2
 mddIdx = preprocessedData['group'] == 1
 groups = [0,1]
@@ -77,86 +55,12 @@ w = 0.6             # width of bars in graph
 figWidth = 6
 figHeight = 8
 
-"""
-Notes:
-for bootstrapping, will ignore outliers and instead treat them as potential true variation
-"""
-nResample = 1000
-
-alphaFdr = desiredPval/(nResample)
-for i in preprocessedData.columns:
-    if i not in ignoreColumns:
-        truncDF = preprocessedData.loc[preprocessedData[i].notnull()]
-        upperLimit = truncDF[i].quantile(0.9)
-        lowerLimit = truncDF[i].quantile(0.1)
-        # truncDF = truncDF.loc[truncDF[i] > lowerLimit]
-        # truncDF = truncDF.loc[truncDF[i] < upperLimit]
-        hcGroup = truncDF[i].loc[truncDF['Study'] == 'HC-MDD']
-        mddGroup = truncDF[i].loc[truncDF['Study'] == 'MDD']
-        if any(hcGroup) and any(mddGroup):
-            hcRandIdx = np.arange(0, len(hcGroup))
-            mddRandIdx = np.arange(0, len(mddGroup))
-            hcBootstrap = np.zeros(nResample)
-            mddBootstrap = np.zeros(nResample)
-            
-            for n in range(nResample):
-                hcBootstrapIdx = np.random.choice(hcRandIdx, size=len(hcGroup), replace=True)
-                mddBootstrapIdx = np.random.choice(mddRandIdx, size=len(mddGroup), replace=True)
-                hcBootstrap[n] = np.mean(np.array(hcGroup)[hcBootstrapIdx])
-                mddBootstrap[n] = np.mean(np.array(mddGroup)[mddBootstrapIdx])
-            # rStat, pVal = scipy_stats.pearsonr(preprocessedData['group'], preprocessedData[i])
-            mu_A = np.sum(hcBootstrap, axis=0)/nResample
-            mu_B = np.sum(mddBootstrap, axis=0)/nResample
-            cov_A = np.cov(hcBootstrap)
-            cov_B = np.cov(mddBootstrap)
-            
-            sig_2_A = np.sum((hcBootstrap - mu_A)**2)/(nResample - 1)
-            sig_2_B = np.sum((mddBootstrap - mu_B)**2)/(nResample - 1)
-            se_A = np.sqrt(sig_2_A/nResample)
-            se_B = np.sqrt(sig_2_B/nResample)
-            # test null hypothesis
-            t_xy = (mu_A - mu_B)/np.sqrt(se_A**2 + se_B**2)
-            # get p values
-            dof = nResample-1
-            p_xy = 2*(1 - scipy_stats.t.cdf(t_xy, dof))
-            tStat, pVal = scipy_stats.ttest_ind(hcBootstrap, mddBootstrap)
-            print(t_xy, tStat)
-            data = [hcBootstrap, mddBootstrap]
-            nChecked += 1
-            # print(lowerLimit, upperLimit, np.max(preprocessedData[i]))
-            fig, ax = plt.subplots()
-            fig.set_figwidth(figWidth)
-            fig.set_figheight(figHeight)
-            n_hc = len(hcGroup)
-            n_mdd = len(mddGroup)
-            n_outliers = len(preprocessedData[i]) - (n_hc + n_mdd)
-            # plot bar graph showing mean of HC and MDD with SEM error bars
-            ax.bar([f'HC, N={n_hc}', f'MDD, N={n_mdd}'], [np.mean(hcBootstrap), np.mean(mddBootstrap)], yerr=[scipy_stats.sem(hcBootstrap), scipy_stats.sem(mddBootstrap)], capsize=3, width=w, label=f'p={p_xy}', color=[colorBlindColorPalette[0],colorBlindColorPalette[3]])
-            ax.set_ylabel(columnHeadersAndFilenames[i]['axisLabel'])
-            for j in range(len(groups)):
-                # distribute scatter randomly across whole width of bar
-                if j == 0:
-                    colorSelect = 2
-                else:
-                    colorSelect = 5
-                ax.scatter(groups[j] + np.random.random(data[j].size) * w - w / 2, data[j], c=colorBlindColorPalette[colorSelect])
-            plt.title(columnHeadersAndFilenames[i]['figureTitle'])
-            plt.legend()
-            if p_xy < alphaFdr:
-                x1, x2 = 0, 1
-                y, h, col = max(map(max, [hcGroup, mddGroup])) + 2, 2, 'k'
-                plt.plot([x1, x1, x2, x2], [y, y+h, y+h, y], lw=1.5, c=col)
-                plt.savefig(os.path.join('/','home','zjpeters','Documents','otherLabs','agarza','derivatives','bootstrap','sigFigures',f'{columnHeadersAndFilenames[i]["filename"]}_ttest_for_HCvMDD_bootstrap.svg'))
-            plt.show()
-            plt.savefig(os.path.join('/','home','zjpeters','Documents','otherLabs','agarza','derivatives','bootstrap',f'{columnHeadersAndFilenames[i]["filename"]}_ttest_for_HCvMDD_bootstrap.svg'))
-            plt.close()
-
-#%% permutation testing
+#%% permutation testing the t-test
 def diffOfMeans(x,y):
     diff = np.mean(x) - np.mean(y)
     return diff
 
-def ttest(A,B):
+def ttest(A,B, nResample=1000):
     mu_A = np.sum(A, axis=0)/nResample
     mu_B = np.sum(B, axis=0)/nResample
     
@@ -167,15 +71,21 @@ def ttest(A,B):
     # test null hypothesis
     tStat = (mu_A - mu_B)/np.sqrt(se_A**2 + se_B**2)
     return tStat
-for i in preprocessedData.columns:
-    if i not in ignoreColumns:
-        truncDF = preprocessedData.loc[preprocessedData[i].notnull()]
-        upperLimit = truncDF[i].quantile(0.9)
-        lowerLimit = truncDF[i].quantile(0.1)
-        truncDF = truncDF.loc[truncDF[i] > lowerLimit]
-        truncDF = truncDF.loc[truncDF[i] < upperLimit]
-        hcGroup = truncDF[i].loc[truncDF['Study'] == 'HC-MDD']
-        mddGroup = truncDF[i].loc[truncDF['Study'] == 'MDD']
+for actColumn in preprocessedData.columns:
+    if actColumn not in ignoreColumns:
+        truncDF = preprocessedData.loc[preprocessedData[actColumn].notnull()]
+        nonTruncDF = preprocessedData.loc[preprocessedData[actColumn].notnull()]
+        hcGroupNonTrunc = nonTruncDF[actColumn].loc[nonTruncDF['Study'] == 'HC-MDD']
+        mddGroupNonTrunc = nonTruncDF[actColumn].loc[nonTruncDF['Study'] == 'MDD']
+        upperLimit = truncDF[actColumn].quantile(0.9)
+        lowerLimit = truncDF[actColumn].quantile(0.1)
+        truncDF = truncDF.loc[truncDF[actColumn] > lowerLimit]
+        truncDF = truncDF.loc[truncDF[actColumn] < upperLimit]
+        hcGroup = truncDF[actColumn].loc[truncDF['Study'] == 'HC-MDD']
+        mddGroup = truncDF[actColumn].loc[truncDF['Study'] == 'MDD']
+        print(actColumn)
+        print('N of HC before truncation: ', len(hcGroupNonTrunc), 'N of HC after truncation: ', len(hcGroup))
+        print('N of MDD: ', len(mddGroupNonTrunc), 'N of HC after truncation: ', len(mddGroup))
         if len(hcGroup) > 1 and len(mddGroup) > 1:
             permResult = scipy_stats.permutation_test((hcGroup, mddGroup), ttest, n_resamples=10000, random_state=12345)
             tStat = permResult.statistic
@@ -183,93 +93,168 @@ for i in preprocessedData.columns:
             print(pVal)
             data = [hcGroup, mddGroup]
             nChecked += 1
+            n_hc = len(hcGroup)
+            n_mdd = len(mddGroup)
+            n_outliers = len(preprocessedData[actColumn]) - (n_hc + n_mdd)
             # print(lowerLimit, upperLimit, np.max(preprocessedData[i]))
             fig, ax = plt.subplots()
             fig.set_figwidth(figWidth)
             fig.set_figheight(figHeight)
-            n_hc = len(hcGroup)
-            n_mdd = len(mddGroup)
-            n_outliers = len(preprocessedData[i]) - (n_hc + n_mdd)
             # plot bar graph showing mean of HC and MDD with SEM error bars
-            ax.bar([f'HC, N={n_hc}', f'MDD, N={n_mdd}'], [np.mean(hcGroup), np.mean(mddGroup)], yerr=[scipy_stats.sem(hcGroup), scipy_stats.sem(mddGroup)], capsize=3, width=w, label=f'p={pVal}', color=[colorBlindColorPalette[0],colorBlindColorPalette[3]])
-            ax.set_ylabel(columnHeadersAndFilenames[i]['axisLabel'])
+            ax.bar([f'HC, N={n_hc}', f'MDD, N={n_mdd}'], [np.mean(hcGroup), np.mean(mddGroup)], yerr=[scipy_stats.sem(hcGroup), scipy_stats.sem(mddGroup)], capsize=3, width=w, label=f'p={pVal}', color=[colorHCHex,colorMDDHex])
+            ax.set_ylabel(columnHeadersAndFilenames[actColumn]['axisLabel'])
             for j in range(len(groups)):
                 # distribute scatter randomly across whole width of bar
                 if j == 0:
-                    colorSelect = 2
+                    ax.scatter(groups[j] + np.random.random(data[j].size) * w - w / 2, data[j], c=colorHCScatterHex)
                 else:
-                    colorSelect = 5
-                ax.scatter(groups[j] + np.random.random(data[j].size) * w - w / 2, data[j], c=colorBlindColorPalette[colorSelect])
-            plt.title(columnHeadersAndFilenames[i]['figureTitle'])
+                    ax.scatter(groups[j] + np.random.random(data[j].size) * w - w / 2, data[j], c=colorMDDScatterHex)
+            plt.title(columnHeadersAndFilenames[actColumn]['figureTitle'])
+            plt.legend()
+            # below if statement adds brackets for significance and outputs into sig figures folder
+            if pVal < desiredPval:
+                x1, x2 = 0, 1
+                y, h, col = max(map(max, [hcGroup, mddGroup])) + 2, 2, 'k'
+                plt.plot([x1, x1, x2, x2], [y, y+h, y+h, y], lw=1.5, c=col)
+                plt.savefig(os.path.join(derivatives,'permutationTesting','sigFigures',f'{columnHeadersAndFilenames[actColumn]["filename"]}_ttest_for_HCvMDD_bootstrap.svg'))
+            plt.show()
+            plt.savefig(os.path.join(derivatives,'permutationTesting',f'{columnHeadersAndFilenames[actColumn]["filename"]}_ttest_for_HCvMDD_bootstrap.svg'))
+            plt.close()
+
+#%% permutation testing outliers included
+
+for actColumn in preprocessedData.columns:
+    if actColumn not in ignoreColumns:
+        truncDF = preprocessedData.loc[preprocessedData[actColumn].notnull()]
+        nonTruncDF = preprocessedData.loc[preprocessedData[actColumn].notnull()]
+        hcGroupNonTrunc = nonTruncDF[actColumn].loc[nonTruncDF['Study'] == 'HC-MDD']
+        mddGroupNonTrunc = nonTruncDF[actColumn].loc[nonTruncDF['Study'] == 'MDD']
+        # upperLimit = truncDF[i].quantile(0.9)
+        # lowerLimit = truncDF[i].quantile(0.1)
+        truncDF = truncDF.loc[truncDF[actColumn] > lowerLimit]
+        truncDF = truncDF.loc[truncDF[actColumn] < upperLimit]
+        hcGroup = truncDF[actColumn].loc[truncDF['Study'] == 'HC-MDD']
+        mddGroup = truncDF[actColumn].loc[truncDF['Study'] == 'MDD']
+        print(actColumn)
+        print('N of HC before truncation: ', len(hcGroupNonTrunc), 'N of HC after truncation: ', len(hcGroup))
+        print('N of MDD: ', len(mddGroupNonTrunc), 'N of HC after truncation: ', len(mddGroup))
+        if len(hcGroup) > 1 and len(mddGroup) > 1:
+            permResult = scipy_stats.permutation_test((hcGroup, mddGroup), ttest, n_resamples=10000, random_state=12345)
+            tStat = permResult.statistic
+            pVal = permResult.pvalue
+            print(pVal)
+            data = [hcGroup, mddGroup]
+            nChecked += 1
+            n_hc = len(hcGroup)
+            n_mdd = len(mddGroup)
+            n_outliers = len(preprocessedData[actColumn]) - (n_hc + n_mdd)
+            # print(lowerLimit, upperLimit, np.max(preprocessedData[i]))
+            fig, ax = plt.subplots()
+            fig.set_figwidth(figWidth)
+            fig.set_figheight(figHeight)
+            # plot bar graph showing mean of HC and MDD with SEM error bars
+            ax.bar([f'HC, N={n_hc}', f'MDD, N={n_mdd}'], [np.mean(hcGroup), np.mean(mddGroup)], yerr=[scipy_stats.sem(hcGroup), scipy_stats.sem(mddGroup)], capsize=3, width=w, label=f'p={pVal}', color=[colorHCHex,colorMDDHex])
+            ax.set_ylabel(columnHeadersAndFilenames[actColumn]['axisLabel'])
+            for j in range(len(groups)):
+                # distribute scatter randomly across whole width of bar
+                if j == 0:
+                    ax.scatter(groups[j] + np.random.random(data[j].size) * w - w / 2, data[j], c=colorHCScatterHex)
+                else:
+                    ax.scatter(groups[j] + np.random.random(data[j].size) * w - w / 2, data[j], c=colorMDDScatterHex)
+            plt.title(columnHeadersAndFilenames[actColumn]['figureTitle'])
             plt.legend()
             if pVal < desiredPval:
                 x1, x2 = 0, 1
                 y, h, col = max(map(max, [hcGroup, mddGroup])) + 2, 2, 'k'
                 plt.plot([x1, x1, x2, x2], [y, y+h, y+h, y], lw=1.5, c=col)
-                plt.savefig(os.path.join('/','home','zjpeters','Documents','otherLabs','agarza','derivatives','permutationTesting','sigFigures',f'{columnHeadersAndFilenames[i]["filename"]}_ttest_for_HCvMDD_bootstrap.svg'))
+                plt.savefig(os.path.join(derivatives,'permutationTestingOutliersIncluded','sigFigures',f'{columnHeadersAndFilenames[actColumn]["filename"]}_ttest_for_HCvMDD_bootstrap_outliers_included.svg'))
             plt.show()
-            plt.savefig(os.path.join('/','home','zjpeters','Documents','otherLabs','agarza','derivatives','permutationTesting',f'{columnHeadersAndFilenames[i]["filename"]}_ttest_for_HCvMDD_bootstrap.svg'))
+            plt.savefig(os.path.join(derivatives,'permutationTestingOutliersIncluded',f'{columnHeadersAndFilenames[actColumn]["filename"]}_ttest_for_HCvMDD_bootstrap_outliers_included.svg'))
             plt.close()
 
+#%% same calculation as above but using violin plots
 
-# for i in preprocessedData.columns:
-#     if i not in ignoreColumns:
-#         dataDescription = preprocessedData[i].describe()
-#         # iqr = preprocessedData[i].quantile(0.75) - preprocessedData[i].quantile(0.25)
-#         # exclude values outside of the interquartile range
-#         upperLimit = preprocessedData[i].quantile(0.75)# + iqr * 1.5
-#         lowerLimit = preprocessedData[i].quantile(0.25)# - iqr * 1.5
-#         hcGroup = preprocessedData[i].loc[hcIdx]
-#         preOutlierLength = len(hcGroup)
-#         hcGroup = hcGroup[hcGroup < upperLimit]
-#         print(preOutlierLength, len(hcGroup))
-#         hcGroup = np.array(hcGroup > lowerLimit)
-#         mddGroup = preprocessedData[i].loc[mddIdx]
-#         mddGroup = mddGroup[mddGroup < upperLimit]
-#         mddGroup = mddGroup[mddGroup > lowerLimit]
-#         if any(hcGroup) and any(mddGroup):
-#             # rStat, pVal = scipy_stats.pearsonr(preprocessedData['group'], preprocessedData[i])
-#             tStat, pVal = scipy_stats.ttest_ind(hcGroup, mddGroup)
-#             data = [hcGroup, mddGroup]
-#             nChecked += 1
-#             # print(lowerLimit, upperLimit, np.max(preprocessedData[i]))
-#             fig, ax = plt.subplots()
-#             fig.set_figwidth(figWidth)
-#             fig.set_figheight(figHeight)
-#             n_hc = len(hcGroup)
-#             n_mdd = len(mddGroup)
-#             n_outliers = len(preprocessedData[i]) - (n_hc + n_mdd)
-#             # plot bar graph showing mean of HC and MDD with SEM error bars
-#             ax.bar([f'HC, N={n_hc}', f'MDD, N={n_mdd}'], [np.mean(hcGroup), np.mean(mddGroup)], yerr=[scipy_stats.sem(hcGroup), scipy_stats.sem(mddGroup)], capsize=3, width=w, label=f'p={pVal}', color=[colorBlindColorPalette[0],colorBlindColorPalette[3]])
-#             ax.set_ylabel(columnHeadersAndFilenames[i]['axisLabel'])
-#             for j in range(len(groups)):
-#                 # distribute scatter randomly across whole width of bar
-#                 if j == 0:
-#                     colorSelect = 2
-#                 else:
-#                     colorSelect = 5
-#                 ax.scatter(groups[j] + np.random.random(data[j].size) * w - w / 2, data[j], c=colorBlindColorPalette[colorSelect])
-#             plt.title(columnHeadersAndFilenames[i]['figureTitle'])
-#             plt.legend()
-#             if pVal < alphaFdr:
-#                 x1, x2 = 0, 1
-#                 y, h, col = max(map(max, [hcGroup, mddGroup])) + 2, 2, 'k'
-#                 plt.plot([x1, x1, x2, x2], [y, y+h, y+h, y], lw=1.5, c=col)
-#                 plt.savefig(os.path.join('/','home','zjpeters','Documents','otherLabs','agarza','derivatives','noNaN','sigFigures',f'{columnHeadersAndFilenames[i]["filename"]}_ttest_for_HCvMDD.png'))
-#             plt.show()
-#             plt.savefig(os.path.join('/','home','zjpeters','Documents','otherLabs','agarza','derivatives','noNaN',f'{columnHeadersAndFilenames[i]["filename"]}_ttest_for_HCvMDD.png'))
-#             plt.close()
-        # else:
-            # chiSquare, pval = scipy_stats.chisquare(hcGroup, mddGroup)
-            # if pVal < alphaFdr:
-            #     fig, ax = plt.subplots()
-            #     ax.bar(['HC', 'MDD'], [np.mean(hcGroup), np.mean(mddGroup)], yerr=[np.std(hcGroup), np.std(mddGroup)])
-            #     for j in range(len(groups)):
-            #         # distribute scatter randomly across whole width of bar
-            #         ax.scatter(groups[j] + np.random.random(data[j].size) * w - w / 2, data[j])
-            #     plt.title(i)
-            #     plt.show()
+# Also, could you please make them as thin violin plots, with colors #f3766e for HC and #1cbdc2 for MDD
 
+for actColumn in preprocessedData.columns:
+    if actColumn not in ignoreColumns:
+        truncDF = preprocessedData.loc[preprocessedData[actColumn].notnull()]
+        upperLimit = truncDF[actColumn].quantile(0.9)
+        lowerLimit = truncDF[actColumn].quantile(0.1)
+        truncDF = truncDF.loc[truncDF[actColumn] > lowerLimit]
+        truncDF = truncDF.loc[truncDF[actColumn] < upperLimit]
+        hcGroup = truncDF[actColumn].loc[truncDF['Study'] == 'HC-MDD']
+        mddGroup = truncDF[actColumn].loc[truncDF['Study'] == 'MDD']
+        if len(hcGroup) > 1 and len(mddGroup) > 1:
+            permResult = scipy_stats.permutation_test((hcGroup, mddGroup), ttest, n_resamples=10000, random_state=12345)
+            tStat = permResult.statistic
+            pVal = permResult.pvalue
+            print(pVal)
+            data = [hcGroup, mddGroup]
+            nChecked += 1
+            n_hc = len(hcGroup)
+            n_mdd = len(mddGroup)
+            n_outliers = len(preprocessedData[actColumn]) - (n_hc + n_mdd)
+            # print(lowerLimit, upperLimit, np.max(preprocessedData[i]))
+            fig, ax = plt.subplots()
+            fig.set_figwidth(figWidth)
+            fig.set_figheight(figHeight)
+            # plot bar graph showing mean of HC and MDD with SEM error bars
+            # ax.bar([f'HC, N={n_hc}', f'MDD, N={n_mdd}'], [np.mean(hcGroup), np.mean(mddGroup)], yerr=[scipy_stats.sem(hcGroup), scipy_stats.sem(mddGroup)], capsize=3, width=w, label=f'p={pVal}', color=[colorBlindColorPalette[0],colorBlindColorPalette[3]])
+            # violin plot
+            violinInfo = ax.violinplot([hcGroup,mddGroup], showextrema=False, showmeans=False)
+            violinInfo['bodies'][0].set_color(colorHCHex)
+            violinInfo['bodies'][1].set_color(colorMDDHex)
+            ax.set_xticks([1,2], ['HC','MDD'])
+            ax.set_ylabel(columnHeadersAndFilenames[actColumn]['axisLabel'])
+            plt.title(columnHeadersAndFilenames[actColumn]['figureTitle'])
+            if pVal < desiredPval:
+                plt.savefig(os.path.join(derivatives,'permutationTesting','sigFigures',f'{columnHeadersAndFilenames[actColumn]["filename"]}_ttest_for_HCvMDD_bootstrap_violin_plot.svg'))
+            plt.show()
+            plt.savefig(os.path.join(derivatives,'permutationTesting',f'{columnHeadersAndFilenames[actColumn]["filename"]}_ttest_for_HCvMDD_bootstrap_violin_plot.svg'))
+            plt.close()
+
+#%% violin plots without removing outliers
+
+# Also, could you please make them as thin violin plots, with colors #f3766e for HC and #1cbdc2 for MDD
+
+for actColumn in preprocessedData.columns:
+    if actColumn not in ignoreColumns:
+        truncDF = preprocessedData.loc[preprocessedData[actColumn].notnull()]
+        upperLimit = truncDF[actColumn].quantile(0.9)
+        lowerLimit = truncDF[actColumn].quantile(0.1)
+        # truncDF = truncDF.loc[truncDF[i] > lowerLimit]
+        # truncDF = truncDF.loc[truncDF[i] < upperLimit]
+        hcGroup = truncDF[actColumn].loc[truncDF['Study'] == 'HC-MDD']
+        mddGroup = truncDF[actColumn].loc[truncDF['Study'] == 'MDD']
+        if len(hcGroup) > 1 and len(mddGroup) > 1:
+            permResult = scipy_stats.permutation_test((hcGroup, mddGroup), ttest, n_resamples=10000, random_state=12345)
+            tStat = permResult.statistic
+            pVal = permResult.pvalue
+            print(pVal)
+            data = [hcGroup, mddGroup]
+            nChecked += 1
+            n_hc = len(hcGroup)
+            n_mdd = len(mddGroup)
+            n_outliers = len(preprocessedData[actColumn]) - (n_hc + n_mdd)
+            # print(lowerLimit, upperLimit, np.max(preprocessedData[i]))
+            fig, ax = plt.subplots()
+            fig.set_figwidth(figWidth)
+            fig.set_figheight(figHeight)
+            # plot bar graph showing mean of HC and MDD with SEM error bars
+            # ax.bar([f'HC, N={n_hc}', f'MDD, N={n_mdd}'], [np.mean(hcGroup), np.mean(mddGroup)], yerr=[scipy_stats.sem(hcGroup), scipy_stats.sem(mddGroup)], capsize=3, width=w, label=f'p={pVal}', color=[colorBlindColorPalette[0],colorBlindColorPalette[3]])
+            # violin plot
+            violinInfo = ax.violinplot([hcGroup,mddGroup], showextrema=False, showmeans=False)
+            violinInfo['bodies'][0].set_color(colorHCHex)
+            violinInfo['bodies'][1].set_color(colorMDDHex)
+            ax.set_xticks([1,2], ['HC','MDD'])
+            ax.set_ylabel(columnHeadersAndFilenames[actColumn]['axisLabel'])
+            plt.title(columnHeadersAndFilenames[actColumn]['figureTitle'])
+            if pVal < desiredPval:
+                plt.savefig(os.path.join(derivatives,'permutationTestingOutliersIncluded','sigFigures',f'{columnHeadersAndFilenames[actColumn]["filename"]}_ttest_for_HCvMDD_bootstrap_violin_plot_outliers_included.svg'))
+            plt.show()
+            plt.savefig(os.path.join(derivatives,'permutationTestingOutliersIncluded',f'{columnHeadersAndFilenames[actColumn]["filename"]}_ttest_for_HCvMDD_bootstrap_violin_plot_outliers_included.svg'))
+            plt.close()
 #%% perform correlation between cytokine levels and BDI scores
 def calculateLeastSquaresRegression(x, y, n=1):
     """
@@ -322,19 +307,18 @@ def corrTest(A,B):
     return rStat
 
 for bdi in bdiColumns:
-    for i in preprocessedData.columns:
-        if i not in ignoreColumns:
+    for actColumn in preprocessedData.columns:
+        if actColumn not in ignoreColumns:
             nChecked += 1
-            if i not in bdiColumns:
-                
-                upperLimit = preprocessedData[i].quantile(0.9)# + iqr * 1.5
-                lowerLimit = preprocessedData[i].quantile(0.1)# - iqr * 1.5
-                hcGroup = preprocessedData[i].loc[hcIdx]
+            if actColumn not in bdiColumns:
+                upperLimit = preprocessedData[actColumn].quantile(0.9)# + iqr * 1.5
+                lowerLimit = preprocessedData[actColumn].quantile(0.1)# - iqr * 1.5
+                hcGroup = preprocessedData[actColumn].loc[hcIdx]
                 preOutlierLength = len(hcGroup)
                 # hcGroup = hcGroup[hcGroup < upperLimit]
                 # print(preOutlierLength, len(hcGroup))
                 # hcGroup = np.array(hcGroup > lowerLimit)
-                mddGroup = preprocessedData[i].loc[mddIdx]
+                mddGroup = preprocessedData[actColumn].loc[mddIdx]
                 mddBDIGroup = preprocessedData[bdi].loc[mddIdx]
                 # print(upperLimit, lowerLimit, np.mean(mddGroup))
                 outlierUpperIdx = mddGroup < upperLimit
@@ -372,15 +356,78 @@ for bdi in bdiColumns:
                     # plot bar graph showing mean of HC and MDD with SEM error bars
                     # ax.bar(['HC', 'MDD'], [np.mean(hcGroup), np.mean(mddGroup)], yerr=[scipy_stats.sem(hcGroup), scipy_stats.sem(mddGroup)], width=w)
                     ax.set_xlabel(columnHeadersAndFilenames[bdi]['axisLabel'])
-                    ax.set_ylabel(columnHeadersAndFilenames[i]['axisLabel'])
+                    ax.set_ylabel(columnHeadersAndFilenames[actColumn]['axisLabel'])
                     plt.legend()
-                    plt.title(f"{columnHeadersAndFilenames[i]['figureTitle']}\ncorrelation with {bdi}\nIn MDD, N={nData}")
+                    plt.title(f"{columnHeadersAndFilenames[actColumn]['figureTitle']}\ncorrelation with {bdi}\nIn MDD, N={nData}")
                     plt.show()
                     if pVal < desiredPval:
-                        plt.savefig(os.path.join('/','home','zjpeters','Documents','otherLabs','agarza','derivatives','permutationTesting','sigFigures',f'{columnHeadersAndFilenames[i]["filename"]}_pearson_r_{columnHeadersAndFilenames[bdi]["filename"]}.svg'))
-                    plt.savefig(os.path.join('/','home','zjpeters','Documents','otherLabs','agarza','derivatives','permutationTesting','BDICorrelations',f'{columnHeadersAndFilenames[i]["filename"]}_pearson_r_{columnHeadersAndFilenames[bdi]["filename"]}.svg'))
+                        plt.savefig(os.path.join(derivatives,'permutationTesting','sigFigures',f'{columnHeadersAndFilenames[actColumn]["filename"]}_pearson_r_{columnHeadersAndFilenames[bdi]["filename"]}.svg'))
+                    plt.savefig(os.path.join(derivatives,'permutationTesting','BDICorrelations',f'{columnHeadersAndFilenames[actColumn]["filename"]}_pearson_r_{columnHeadersAndFilenames[bdi]["filename"]}.svg'))
                     plt.close()
 
+#%% run correlation between cytokins and cell count
+
+cellCountColumns = ["Singlets per µl", "Granulocytes per µl", "Neutrophils per µl", "Monocytes per µl", "Classical per µl", "Intermediate per µl", "Nonclassical per µl","Tcells per µl", "Thelpersper µl", "NKT per µl", "NK per µl", "Bcell per µl", "Cytotoxic T per µl"]
+
+for cellCount in cellCountColumns:
+    for actColumn in preprocessedData.columns:
+        if actColumn not in ignoreColumns:
+            nChecked += 1
+            if actColumn not in cellCountColumns:
+                
+                upperLimit = preprocessedData[actColumn].quantile(0.9)# + iqr * 1.5
+                lowerLimit = preprocessedData[actColumn].quantile(0.1)# - iqr * 1.5
+                hcGroup = preprocessedData[actColumn].loc[hcIdx]
+                preOutlierLength = len(hcGroup)
+                # hcGroup = hcGroup[hcGroup < upperLimit]
+                # print(preOutlierLength, len(hcGroup))
+                # hcGroup = np.array(hcGroup > lowerLimit)
+                mddGroup = preprocessedData[actColumn].loc[mddIdx]
+                mddCellCountGroup = preprocessedData[cellCount].loc[mddIdx]
+                # print(upperLimit, lowerLimit, np.mean(mddGroup))
+                outlierUpperIdx = mddGroup < upperLimit
+                mddGroup = mddGroup.loc[outlierUpperIdx]
+                mddCellCountGroup = mddCellCountGroup.loc[outlierUpperIdx]
+                outlierLowerIdx = mddGroup > lowerLimit
+                mddGroup = mddGroup.loc[outlierLowerIdx]
+                mddCellCountGroup = mddCellCountGroup.loc[outlierLowerIdx]
+                mddGroup = mddGroup[mddGroup.notna()]
+                mddCellCountGroup = mddCellCountGroup[mddGroup.notna()]
+                mddGroup = mddGroup[mddCellCountGroup.notna()]
+                mddCellCountGroup = mddCellCountGroup[mddCellCountGroup.notna()]
+                if len(mddGroup) > 2:
+                    nData = len(mddGroup)
+                    # rStat, pVal = scipy_stats.pearsonr(mddBDIGroup, mddGroup)
+                    permResult = scipy_stats.permutation_test((mddCellCountGroup, mddGroup), corrTest, n_resamples=10000, permutation_type='pairings', random_state=12345)
+                    rStat = permResult.statistic
+                    pVal = permResult.pvalue
+                    print(pVal)
+                    data = [hcGroup, mddGroup]
+                    # data = [hcGroup, mddGroup]
+                    # if pVal < 0.005:
+                    # print(scipy_stats.iqr(preprocessedData[i]), np.mean(preprocessedData[i]))
+                    fig, ax = plt.subplots()
+                    fig.set_figwidth(figWidth)
+                    fig.set_figheight(figHeight)
+                    ax.scatter(mddCellCountGroup, mddGroup, label=f'r={rStat}')
+                    # xRange, yRange = np.polyfit(mddBDIGroup.to_numpy(), mddGroup.to_numpy(), deg=1)
+                    xRange, yRange = calculateLeastSquaresRegression(mddCellCountGroup.to_numpy(), mddGroup.to_numpy())
+                    # y_err = scipy_stats.sem(mddBDIGroup.to_numpy())
+                    y_err = xRange.std() * np.sqrt(1/len(xRange) +
+                          (xRange - xRange.mean())**2 / np.sum((xRange - xRange.mean())**2))
+                    ax.plot(xRange, yRange, label=f'p={pVal}')
+                    #plt.fill_between(xRange, yRange - y_err, yRange + y_err, alpha=0.5)
+                    # plot bar graph showing mean of HC and MDD with SEM error bars
+                    # ax.bar(['HC', 'MDD'], [np.mean(hcGroup), np.mean(mddGroup)], yerr=[scipy_stats.sem(hcGroup), scipy_stats.sem(mddGroup)], width=w)
+                    ax.set_xlabel(columnHeadersAndFilenames[cellCount]['axisLabel'])
+                    ax.set_ylabel(columnHeadersAndFilenames[actColumn]['axisLabel'])
+                    plt.legend()
+                    plt.title(f"{columnHeadersAndFilenames[actColumn]['figureTitle']}\ncorrelation with {cellCount}\nIn MDD, N={nData}")
+                    plt.show()
+                    if pVal < desiredPval:
+                        plt.savefig(os.path.join(derivatives,'permutationTesting','sigFigures',f'{columnHeadersAndFilenames[actColumn]["filename"]}_pearson_r_{columnHeadersAndFilenames[cellCount]["filename"]}.svg'))
+                    plt.savefig(os.path.join(derivatives,'permutationTesting','cellCountCorrelations',f'{columnHeadersAndFilenames[actColumn]["filename"]}_pearson_r_{columnHeadersAndFilenames[cellCount]["filename"]}.svg'))
+                    plt.close()
 #%% create function for running correlation matrices
 def calculateCorrelationMatrices(columnList):
     corrMatrixHC = np.zeros([len(columnList), len(columnList)])
@@ -435,110 +482,6 @@ def calculateCorrelationMatrices(columnList):
     ax.set_yticks(range(len(columnList)))
     ax.set_xticklabels(columnList, rotation=45)
     ax.set_yticklabels(columnList, rotation=0)
-#%% process the correlation of all columns
-# nChecked = len(preprocessedData.columns) - len(ignoreColumns) + 1
-# corrMatrixHC = np.zeros([nChecked + 1, nChecked + 1])
-# corrMatrixMDD = np.zeros([nChecked + 1, nChecked + 1])
-# pValMatrixHC = np.zeros([nChecked + 1, nChecked + 1])
-# pValMatrixMDD = np.zeros([nChecked + 1, nChecked + 1])
-# iIdx = 0
-# for i in enumerate(preprocessedData.columns):
-#     if i[1] not in ignoreColumns:
-#         hcGroup = preprocessedData[i[1]].loc[hcIdx]
-#         mddGroup = preprocessedData[i[1]].loc[mddIdx]
-#         mddGroup = mddGroup[mddGroup.notna()]
-#         hcGroup = hcGroup[hcGroup.notna()]
-#         hcGroupColumnA = np.array(hcGroup)
-#         mddGroupColumnA = np.array(mddGroup)
-#         # data = [hcGroup, mddGroup]
-#         jIdx = 0
-#         for j in enumerate(preprocessedData.columns):
-#             if j[1] not in ignoreColumns:
-#                 hcGroup = preprocessedData[j[1]].loc[hcIdx]
-#                 mddGroup = preprocessedData[j[1]].loc[mddIdx]
-#                 mddGroup = mddGroup[mddGroup.notna()]
-#                 hcGroup = hcGroup[hcGroup.notna()]
-#                 hcGroupColumnB = np.array(hcGroup)
-#                 mddGroupColumnB = np.array(mddGroup)
-#                 if len(hcGroupColumnA) > 1 and len(hcGroupColumnB) > 1 and len(mddGroupColumnA) > 1 and len(mddGroupColumnB) > 1:
-#                     rStatHC, pValHC = scipy_stats.pearsonr(hcGroupColumnA, hcGroupColumnB)
-#                     rStatMDD, pValMDD = scipy_stats.pearsonr(mddGroupColumnA, mddGroupColumnB)
-#                     corrMatrixHC[iIdx,jIdx] = rStatHC
-#                     corrMatrixMDD[iIdx,jIdx] = rStatMDD
-#                     pValMatrixHC[iIdx,jIdx] = pValHC
-#                     pValMatrixMDD[iIdx,jIdx] = pValMDD
-#                 jIdx += 1
-#         iIdx += 1
-
-# #%% plotting heatmaps of correlation
-# plt.close('all')
-# plt.figure()
-# sns.heatmap(corrMatrixHC, vmin=-1, vmax=1, cmap='vlag')
-# plt.title("Correlation in HC")
-# plt.figure()
-# sns.heatmap(corrMatrixMDD, vmin=-1, vmax=1, cmap='vlag')
-# plt.title("Correlation in MDD")
-# diffMap = corrMatrixHC - corrMatrixMDD
-# plt.figure()
-# sns.heatmap(diffMap, vmin=-1, vmax=1, cmap='vlag')
-# plt.title("Difference between HC and MDD (HC > MDD)")
-#%% setup groups to use for correlation matrices
-
-# group01 = ['Singlets per µl',	'Granulocytes per µl',	'Neutrophils per µl'	,'Monocytes per µl',	'Classical per µl',	'Intermediate per µl',	'Nonclassical per µl']
-# corrMatrixHC = np.zeros([len(group01), len(group01)])
-# corrMatrixMDD = np.zeros([len(group01), len(group01)])
-# pValMatrixHC = np.zeros([len(group01), len(group01)])
-# pValMatrixMDD = np.zeros([len(group01), len(group01)])
-# iIdx = 0
-# for i in enumerate(group01):
-#     hcGroup = preprocessedData[i[1]].loc[hcIdx]
-#     mddGroup = preprocessedData[i[1]].loc[mddIdx]
-#     mddGroup = mddGroup[mddGroup.notna()]
-#     hcGroup = hcGroup[hcGroup.notna()]
-#     hcGroupColumnA = np.array(hcGroup)
-#     mddGroupColumnA = np.array(mddGroup)
-#     # data = [hcGroup, mddGroup]
-#     jIdx = 0
-#     for j in enumerate(group01):
-#         hcGroup = preprocessedData[j[1]].loc[hcIdx]
-#         mddGroup = preprocessedData[j[1]].loc[mddIdx]
-#         mddGroup = mddGroup[mddGroup.notna()]
-#         hcGroup = hcGroup[hcGroup.notna()]
-#         hcGroupColumnB = np.array(hcGroup)
-#         mddGroupColumnB = np.array(mddGroup)
-#         if len(hcGroupColumnA) > 1 and len(hcGroupColumnB) > 1 and len(mddGroupColumnA) > 1 and len(mddGroupColumnB) > 1:
-#             rStatHC, pValHC = scipy_stats.pearsonr(hcGroupColumnA, hcGroupColumnB)
-#             rStatMDD, pValMDD = scipy_stats.pearsonr(mddGroupColumnA, mddGroupColumnB)
-#             corrMatrixHC[iIdx,jIdx] = rStatHC
-#             corrMatrixMDD[iIdx,jIdx] = rStatMDD
-#             pValMatrixHC[iIdx,jIdx] = pValHC
-#             pValMatrixMDD[iIdx,jIdx] = pValMDD
-#         jIdx += 1
-#     iIdx += 1
-
-# #%% plotting heatmaps of correlation
-# plt.close('all')
-# # fig, ax = plt.subplots()
-# ax = sns.heatmap(corrMatrixHC, vmin=-1, vmax=1, cmap='vlag', annot=True)
-# plt.title('Correlation in HC')
-# ax.set_xticklabels(group01, rotation=45)
-# ax.set_yticklabels(group01, rotation=45)
-# # for i in range(len(group01)):
-# #     for j in range(len(group01)):
-# #         text = ax.text(j, i, corrMatrixHC[i, j], color="k")
-
-# fig, ax = plt.subplots()
-# sns.heatmap(corrMatrixMDD, vmin=-1, vmax=1, cmap='vlag')
-# plt.title('Correlation in MDD')
-# ax.set_xticklabels(group01, rotation=45)
-# ax.set_yticklabels(group01, rotation=45)
-
-# diffMap = corrMatrixHC - corrMatrixMDD
-# fig, ax = plt.subplots()
-# sns.heatmap(diffMap, vmin=-1, vmax=1, cmap='vlag')
-# plt.title('Difference between correlation, HC - MDD')
-# ax.set_xticklabels(group01, rotation=45)
-# ax.set_yticklabels(group01, rotation=45)
 
 #%% group 1
 group01 = ['Singlets per µl',	'Granulocytes per µl',	'Neutrophils per µl'	,'Monocytes per µl',	'Classical per µl',	'Intermediate per µl',	'Nonclassical per µl']
